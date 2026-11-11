@@ -97,10 +97,35 @@ O fluxo esperado é:
 
 1. Analisar a pasta pessoal ou o diretório solicitado e informar espaço livre, maiores pastas, caches conhecidos e arquivos grandes.
 2. Apresentar os candidatos com caminhos exatos, tamanhos estimados e consequências da remoção.
-3. Pedir aprovação de uma seleção concreta de itens.
+3. Abrir uma seleção no chat, permitir ajustes e apresentar os itens escolhidos para aprovação.
 4. Revalidar os caminhos, remover somente os itens aprovados e medir o espaço livre novamente.
 
 **Invocar a skill não autoriza apagar arquivos.** Você pode solicitar apenas a análise. Uma aprovação de caches não autoriza a remoção de arquivos pessoais ou de novos itens encontrados depois.
+
+### Selecionar pelo chat
+
+Ao terminar a análise, o agente apresenta os candidatos com números fixos, caminhos, tamanhos estimados e consequências. Se o chat disponibilizar uma ferramenta de seleção adequada, o agente usa essa interface. A aparência e o suporte a seleção múltipla dependem do harness; a skill não instala componentes de interface.
+
+Nos demais ambientes, a interação funciona como um menu por texto, direto na conversa:
+
+```text
+Escolha o que deseja remover:
+[ ] 1 | /example/.npm/_cacache | ~1,2 GiB | cache | exclusão permanente; exigirá novos downloads
+[ ] 2 | /example/.cache/pip    | ~800 MiB | cache | exclusão permanente; exigirá novos downloads
+Selecionados: nenhum
+```
+
+Você pode responder com:
+
+| Resposta | Ação |
+| --- | --- |
+| `1, 2` ou `1-2` | Define a seleção pelos números exibidos. |
+| `adicionar 2` / `remover 1` | Ajusta a seleção atual. |
+| `detalhes 2` | Mostra as consequências de remover esse item. |
+| `revisar` | Exibe os caminhos escolhidos, o total estimado e pede aprovação para apagar. |
+| `cancelar` | Encerra sem apagar nada. |
+
+Os marcadores `[ ]` do menu de texto são apenas visuais. A cada ajuste, o agente informa os itens selecionados e o total estimado. Selecionar não apaga: depois da revisão, responda explicitamente, por exemplo, `apagar os itens selecionados`. Se você já pediu a exclusão dos itens exatos apresentados, o agente aproveita essa aprovação sem repeti-la. Pedidos de relatório sem limpeza terminam na análise.
 
 ## Executar o analisador sem um agente
 

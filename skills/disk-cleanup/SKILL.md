@@ -25,9 +25,29 @@ Show available disk space, largest top-level directories, then a table with exac
 
 For Docker, inspect `docker system df` and inspect specific unused images/build caches if available. Do not delete Docker VM disk files, run broad system prune, or remove volumes as a cache cleanup. Volumes can contain databases. For Android/iOS, prefer supported SDK/simulator management tools and list individual obsolete versions/devices before proposing removal. Project directories, node_modules, build outputs, backups, photos, archives, virtual machines, and downloads require item-specific review; do not infer that a project is abandoned from age alone.
 
-## Agree on a cleanup
+## Select in chat
 
-Present a concrete numbered selection with paths, estimated reclaimable space, and consequences. Ask which items the user approves. Allow approval of a clearly defined group (for example items 1–4). If the user already approved the exact items in the current conversation, proceed without asking again. Approval of caches does not extend to personal files, Docker volumes, emulators, or new items discovered later. A filesystem/tool approval is separate from approval of the cleanup selection.
+After the analysis, offer an interactive cleanup selection in the conversation. If the user explicitly requested a report only, finish with the report. If there are no reviewed removal candidates, explain that instead of offering an empty selector.
+
+Give each reviewed candidate a stable numeric ID for this analysis, exact path, estimated reclaimable space, category, removal method (permanent deletion or Trash), and consequences. Keep IDs unchanged across pages and selection updates; new candidates get new IDs. Large files need item-specific review before entering the menu. Do not offer overlapping parent/child targets as independent choices or double-count their sizes. Mark partial scan sizes as incomplete estimates.
+
+Use the host's native question/selection tool when it is available and permitted in the current mode. Prefer multi-select with nothing selected by default; include details and cancel actions when supported. Respect the tool's actual option limits and selection semantics: do not pass a multi-select list to a single-choice tool. With single-choice tools, offer one item at a time or actions for changing the selection. Never treat a default, an unanswered prompt, or a timeout as a submitted choice. A skill cannot add widgets to the host; do not claim clickable checkboxes or keyboard navigation unless the tool actually provides them.
+
+When native selection is unavailable or unsuitable, render a numbered menu in chat and accept short replies. Use the user's language for all labels and commands. For example, in Portuguese:
+
+```text
+Escolha o que deseja remover:
+[ ] 1 | /example/.npm/_cacache | ~1,2 GiB | cache | exclusão permanente; exigirá novos downloads
+[ ] 2 | /example/.cache/pip    | ~800 MiB | cache | exclusão permanente; exigirá novos downloads
+Selecionados: nenhum
+
+Responda com números (1, 2), adicionar 2, remover 1,
+detalhes 2, revisar ou cancelar. Selecionar não apaga arquivos.
+```
+
+Bare IDs or ranges replace the selection; add/remove commands modify it. Keep this state in the conversation, without starting a terminal TUI that the user cannot operate through chat. On each update show the selected IDs and estimated total, then offer review or further changes. Resolve IDs only against the displayed candidates, never as shell arguments. Unknown IDs or ambiguous replies leave the selection unchanged and require clarification. Do not infer a selection from “recommended” or “clean everything”; show the exact proposed set for review. A clearly defined group can be selected when its members have been shown. Cancel ends the flow without deletion; an empty selection cannot be executed.
+
+On review, present the exact selected paths, methods, consequences, and combined estimate, and ask for an explicit action: delete these items, change selection, or cancel. An explicit deletion request for already displayed, fully specified items counts as approval; proceed without asking again. A selection-only response does not. Preserve existing approval of exact items in the current conversation. Approval of caches does not extend to personal files, Docker volumes, emulators, or new items discovered later. A filesystem/tool approval is separate from approval of the cleanup selection.
 
 ## Execute and verify
 
