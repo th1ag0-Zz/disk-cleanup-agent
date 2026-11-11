@@ -175,21 +175,6 @@ Os testes usam apenas arquivos temporários e verificam preservação dos dados,
 
 Para contribuir, abra uma issue ou pull request com o comportamento esperado, sistema operacional e passos de reprodução. Use exemplos fictícios e execute os testes ao alterar o analisador. Preserve a análise somente leitura e a aprovação de itens específicos antes de qualquer exclusão.
 
-## Publicação no skills.sh
-
-Para quem mantém este repositório:
-
-1. Publique os arquivos no repositório público [th1ag0-Zz/disk-cleanup-agent](https://github.com/th1ag0-Zz/disk-cleanup-agent).
-2. Preserve `skills/disk-cleanup/SKILL.md` e os arquivos da skill. O layout `skills/<nome>/SKILL.md` é [descoberto pelo CLI](https://github.com/vercel-labs/skills/blob/main/docs/creating-skills.md); o frontmatter já contém `name` e `description`.
-3. Confira a descoberta sem instalar e, em seguida, teste a instalação usando a origem pública:
-
-   ```sh
-   npx skills add th1ag0-Zz/disk-cleanup-agent --list
-   npx skills add th1ag0-Zz/disk-cleanup-agent --skill disk-cleanup
-   ```
-
-Segundo a [FAQ do skills.sh](https://skills.sh/docs/faq), a listagem ocorre automaticamente a partir das instalações registradas pela telemetria do CLI. Não é necessário publicar um pacote npm nem fazer uma submissão manual ao diretório.
-
 ## Licença
 
 [MIT](LICENSE).
