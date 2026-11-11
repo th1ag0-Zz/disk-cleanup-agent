@@ -1,0 +1,4 @@
+interface:
+  display_name: "Disk Cleanup"
+  short_description: "Analisa o disco e propõe limpezas para aprovação"
+  default_prompt: "Use $disk-cleanup para analisar meu disco, listar caches e arquivos grandes e pedir aprovação antes de apagar."
