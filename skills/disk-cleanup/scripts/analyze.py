@@ -22,7 +22,69 @@ CACHE_PATHS = (
     (".npm/_npx", "npx downloaded tools"),
     (".cache/pip", "pip package cache"),
     ("Library/Caches/pip", "pip package cache"),
+    (".gradle/caches", "Gradle caches"),
+    (".gradle/wrapper/dists", "Gradle wrapper downloads"),
+    (".cargo/registry/cache", "Cargo downloaded packages"),
+    (".rustup/downloads", "Rustup downloads"),
+    (".rustup/tmp", "Rustup temporary files"),
+    (".bun/install/cache", "Bun package cache"),
+    (".yarn/cache", "Yarn package cache"),
+    ("Library/pnpm/store", "pnpm package store"),
+    (".local/share/pnpm/store", "pnpm package store"),
+    (".composer/cache", "Composer package cache"),
+    (".local/share/NuGet/v3-cache", "NuGet HTTP cache"),
+    (".local/share/NuGet/plugins-cache", "NuGet plugin cache"),
 )
+
+# Relative to a project with a regular manifest/config file. Never classify
+# whole dependency folders, build outputs, environments or framework state.
+JS_MARKERS = ("package.json",)
+PY_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pytest.ini")
+PROJECT_CACHES = (
+    (".next/cache", "Next.js build/runtime cache (stop the app before removal)", JS_MARKERS),
+    (".angular/cache", "Angular build cache", ("angular.json",)),
+    ("node_modules/.vite", "Vite dependency cache", JS_MARKERS),
+    ("node_modules/.cache", "JavaScript tooling cache", JS_MARKERS),
+    (".pytest_cache", "pytest run cache", PY_MARKERS),
+    (".mypy_cache", "mypy type-check cache", PY_MARKERS),
+    (".ruff_cache", "Ruff analysis cache", PY_MARKERS),
+)
+APP_CACHE_LABELS = {
+    "go-build": "Go build cache", "composer": "Composer package cache",
+    "yarn": "Yarn package cache", "pnpm": "pnpm cache/store (review contents)",
+    "node-gyp": "node-gyp downloaded headers", "Cypress": "Cypress downloaded binaries",
+    "ms-playwright": "Playwright browsers", "ms-playwright-mcp": "Playwright MCP browsers",
+    "pip": "pip package cache", "uv": "uv package cache", "pypoetry": "Poetry cache",
+}
+
+
+def project_cache_label(path, home):
+    if home not in path.parents:
+        return None
+    for relative, label, markers in PROJECT_CACHES:
+        parts = Path(relative).parts
+        if path.parts[-len(parts):] != parts:
+            continue
+        project = path.parents[len(parts) - 1]
+        for marker in markers:
+            try:
+                if stat.S_ISREG((project / marker).lstat().st_mode):
+                    return label
+            except OSError:
+                pass
+    return None
+
+
+
+def cache_locations(home):
+    # Classify immediate children, never the whole cache root as one delete target.
+    roots = {home / "Library/Caches", home / ".cache"}
+    configured = os.environ.get("XDG_CACHE_HOME", "")
+    if configured and Path(configured).is_absolute():
+        path = Path(os.path.abspath(configured))
+        if home in path.parents:
+            roots.add(path)
+    return {path for path in roots if not any(base in path.parents for base in roots)}
 
 
 def allocated(info):
@@ -36,12 +98,30 @@ def analyze(root, min_bytes=500 * 1024**2, limit=30):
     root_device = root.stat().st_dev
     disk = shutil.disk_usage(root)
     home = Path.home().resolve()
+    cache_roots = cache_locations(home)
+    labels = {home / relative: label for relative, label in CACHE_PATHS}
     candidates = {}
-    for relative, label in CACHE_PATHS:
-        path = home / relative
-        if path == root or root in path.parents:
+    def add_candidate(path, label):
+        if not any(str(parent) in candidates for parent in path.parents):
             candidates[str(path)] = {"path": str(path), "kind": label,
                                      "allocated_bytes": 0, "scan_complete": True}
+
+    for relative, label in CACHE_PATHS:
+        path = home / relative
+        if (path == root or root in path.parents) and not any(
+                base in path.parents for base in cache_roots):
+            candidates[str(path)] = {"path": str(path), "kind": label,
+                                     "allocated_bytes": 0, "scan_complete": True}
+    # A targeted scan can start at or below an application cache.
+    for base in cache_roots:
+        if base in root.parents:
+            child = base / root.relative_to(base).parts[0]
+            candidates[str(root)] = {"path": str(root),
+                                     "kind": labels.get(child, "Application cache (review contents)"),
+                                     "allocated_bytes": 0, "scan_complete": True}
+    root_label = project_cache_label(root, home)
+    if root_label:
+        add_candidate(root, root_label)
     errors, mounts, top, large = [], [], {}, []
     error_count = skipped_links = visited = total = 0
     seen = set()
@@ -63,6 +143,14 @@ def analyze(root, min_bytes=500 * 1024**2, limit=30):
                             if len(mounts) < 100:
                                 mounts.append(str(path))
                             continue
+                        if path.parent in cache_roots and (
+                                stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                            add_candidate(path, labels.get(path, APP_CACHE_LABELS.get(
+                                path.name, "Application cache (review contents)")))
+                        if stat.S_ISDIR(info.st_mode):
+                            label = project_cache_label(path, home)
+                            if label:
+                                add_candidate(path, label)
                         if stat.S_ISDIR(info.st_mode):
                             stack.append((path, bucket))
                             continue
@@ -76,9 +164,9 @@ def analyze(root, min_bytes=500 * 1024**2, limit=30):
                         size = allocated(info)
                         total += size
                         top[bucket] = top.get(bucket, 0) + size
-                        ancestors = {str(parent) for parent in path.parents}
-                        for base, item in candidates.items():
-                            if base in ancestors:
+                        for ancestor in (path, *path.parents):
+                            item = candidates.get(str(ancestor))
+                            if item is not None:
                                 item["allocated_bytes"] += size
                         if info.st_size >= min_bytes:
                             record = (info.st_size, str(path), size)
@@ -96,7 +184,7 @@ def analyze(root, min_bytes=500 * 1024**2, limit=30):
                 errors.append({"path": str(directory), "error": str(exc)})
     # Any scan error can make candidate totals incomplete; be conservative.
     for item in candidates.values():
-        item["scan_complete"] = error_count == 0
+        item["scan_complete"] = error_count == 0 and not mounts and skipped_links == 0
     return {
         "root": str(root), "platform": sys.platform,
         "disk": {"total_bytes": disk.total, "used_bytes": disk.used,
@@ -112,7 +200,8 @@ def analyze(root, min_bytes=500 * 1024**2, limit=30):
         "skipped_symlinks": skipped_links, "skipped_mounts": mounts,
         "notes": ["Sizes exclude directory metadata. Hard-linked files counted once; attribution follows traversal order.",
                   "Logical file size may exceed physical allocation. Totals are estimates, not guaranteed reclaimable space.",
-                  "Only known cache paths under the current user's home are classified. Custom cache paths require manual review."]}
+                  "The entire scan root is inventoried, including hidden directories. Cache classification does not authorize deletion.",
+                  "Application cache roots and known tool paths under the current user's home are classified. Other locations require manual review."]}
 
 
 def main():

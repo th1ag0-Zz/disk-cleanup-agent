@@ -145,6 +145,8 @@ python3 skills/disk-cleanup/scripts/analyze.py --help
 
 O filtro de tamanho e o limite afetam apenas a lista de arquivos grandes; não reduzem a varredura nem os totais das pastas. Para uma análise mais rápida, escolha um `--root` menor. A varredura completa da pasta pessoal pode demorar e consumir memória proporcional à quantidade de arquivos.
 
+A varredura percorre todas as pastas acessíveis dentro da raiz, inclusive as ocultas: Downloads, documentos, área de trabalho, fotos, vídeos, músicas, projetos, backups e dados de aplicativos. Não depende dos nomes dessas pastas nem de uma lista de ferramentas usadas pelo autor. A pasta pessoal é descoberta no ambiente de cada usuário; outras contas, diretórios do sistema e volumes externos não entram automaticamente no escopo.
+
 A saída JSON vai para o terminal, com tamanhos em bytes:
 
 | Campo | Conteúdo |
@@ -161,7 +163,28 @@ O espaço usado do volume pode ser maior que o total analisado, pois a varredura
 
 ## Cuidados e limitações
 
-- Caches conhecidos: Playwright, Expo, Xcode, uv, npm/npx e pip. Exigem downloads ou recompilações após a remoção; ferramentas em uso devem ser fechadas antes.
+### Caches de desenvolvimento
+
+Além das pastas gerais de cache, o analisador reconhece estes locais dentro da pasta pessoal:
+
+| Ferramenta | Caminhos reconhecidos |
+| --- | --- |
+| Next.js | `<projeto>/.next/cache` |
+| Angular | `<projeto>/.angular/cache` |
+| Vite | `<projeto>/node_modules/.vite` |
+| Ferramentas JavaScript | `<projeto>/node_modules/.cache` |
+| pytest, mypy e Ruff | `<projeto>/.pytest_cache`, `.mypy_cache`, `.ruff_cache` |
+| Composer | `~/.composer/cache`, além das pastas gerais |
+| NuGet | `~/.local/share/NuGet/v3-cache` e `plugins-cache` |
+
+Os caches JavaScript exigem `package.json` na raiz do projeto; Angular exige `angular.json`. Os caches Python exigem um destes arquivos: `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` ou `pytest.ini`. A verificação lê apenas metadados desses arquivos. Pastas com o mesmo nome, sem esse contexto, continuam sendo inventariadas e exigem classificação manual.
+
+Nas pastas gerais, também há rótulos específicos para Go (`go-build`), Composer, Yarn, pnpm, node-gyp, Cypress e Poetry. Caches em locais personalizados não são descobertos automaticamente fora das regras descritas.
+
+Os caminhos de [Next.js](https://nextjs.org/docs/app/guides/ci-build-caching), [Angular](https://angular.dev/cli/cache), [Vite](https://vite.dev/config/shared-options.html#cachedir) e [NuGet](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders) seguem suas referências oficiais. Feche servidores e processos antes da limpeza: caches Next.js podem conter dados usados durante a execução; o cache pytest contém histórico de testes. Builds, ambientes virtuais, dependências completas, credenciais e sessões de agentes continuam exigindo revisão específica.
+
+- Caches de aplicativos: descobre individualmente as entradas de `~/Library/Caches` e `~/.cache`, sem exigir uma lista de aplicativos. Entradas genéricas precisam de revisão do conteúdo antes de propor remoção.
+- Caches de ferramentas: reconhece também Expo, Xcode, npm/npx, Gradle, Cargo, Rustup, Bun, Yarn e pnpm fora dessas pastas. Playwright, uv, pip, navegadores e outros aplicativos são identificados nas pastas gerais de cache. Podem exigir downloads ou recompilações após a remoção; ferramentas em uso devem ser fechadas antes.
 - Arquivos grandes: apenas candidatos para decisão humana; tamanho não significa que podem ser apagados.
 - Docker, emuladores e SDKs: precisam de inspeção própria. Volumes podem conter bancos de dados.
 - Projetos e arquivos pessoais: nunca classificados automaticamente como descartáveis.
@@ -170,7 +193,7 @@ Durante a varredura, links simbólicos e entradas em outros sistemas de arquivos
 
 Arquivos com hard links são contados uma vez. APFS, snapshots, arquivos esparsos e arquivos abertos podem alterar o espaço realmente recuperado. A soma dos tamanhos dos candidatos é uma estimativa; o resultado da limpeza deve ser conferido pela variação medida de espaço livre.
 
-A identificação automática de caches cobre apenas caminhos conhecidos na pasta pessoal do usuário atual, dentro do escopo analisado. Não cobre todas as aplicações nem diretórios personalizados.
+A identificação automática de caches se restringe à pasta pessoal do usuário atual e ao escopo analisado. Respeita também `XDG_CACHE_HOME` quando for um caminho absoluto dentro dessa pasta pessoal; valores relativos ou externos não ampliam o escopo. Outras localizações personalizadas são inventariadas quando dentro da raiz, mas precisam de classificação manual. Os candidatos não incluem alvos sobrepostos. Erros, links ou volumes ignorados fazem os tamanhos dos candidatos serem marcados como estimativas incompletas.
 
 ## Privacidade
 

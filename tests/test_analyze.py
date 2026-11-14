@@ -66,6 +66,120 @@ class AnalyzeTests(unittest.TestCase):
             self.assertEqual(report["scan_error_count"], 1)
             self.assertIn("denied", report["scan_errors"][0]["error"])
 
+    def test_general_application_caches_and_personal_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            paths = ["Library/Caches/Some App/data", ".cache/browser/data",
+                     ".gradle/caches/data", "Downloads/personal",
+                     "Documents/report", ".hidden/unknown"]
+            for name in paths:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x" * 4096)
+            with patch.object(scanner.Path, "home", return_value=root):
+                report = scanner.analyze(root)
+                targeted = scanner.analyze(root / "Library/Caches/Some App")
+            self.assertEqual(report["files_scanned"], len(paths))
+            self.assertEqual({x["path"] for x in report["cache_candidates"]}, {
+                str(root / name) for name in (
+                    "Library/Caches/Some App", ".cache/browser", ".gradle/caches")})
+            self.assertEqual(len(targeted["cache_candidates"]), 1)
+            self.assertEqual(targeted["cache_candidates"][0]["allocated_bytes"],
+                             scanner.allocated((root / paths[0]).stat()))
+
+    def test_xdg_cache_scope_symlinks_and_no_overlap(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            root = Path(tmp).resolve()
+            for name in ("custom-cache/app/data", ".cache/nested/app/data"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x" * 4096)
+            external = Path(outside) / "private"
+            external.write_bytes(b"x" * 8192)
+            (root / ".cache/link").symlink_to(outside, target_is_directory=True)
+            for setting, expected in (
+                (str(root / "custom-cache"), 2),
+                (str(root / ".cache/nested"), 1),
+                (outside, 1), ("relative", 1),
+            ):
+                with self.subTest(setting=setting), patch.object(
+                        scanner.Path, "home", return_value=root), patch.dict(
+                            os.environ, {"XDG_CACHE_HOME": setting}):
+                    report = scanner.analyze(root)
+                self.assertEqual(len(report["cache_candidates"]), expected)
+                self.assertEqual(report["files_scanned"], 2)
+                self.assertTrue(all(not x["scan_complete"] for x in report["cache_candidates"]))
+                targets = [Path(x["path"]) for x in report["cache_candidates"]]
+                self.assertFalse(any(a in b.parents for a in targets for b in targets))
+
+    def test_cache_files_count_once_without_nested_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for name in ("Library/Caches/pip/data", "Library/Caches/single-file"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x" * 4096)
+            with patch.object(scanner.Path, "home", return_value=root):
+                report = scanner.analyze(root)
+            self.assertEqual(len(report["cache_candidates"]), 2)
+            self.assertEqual(sum(x["allocated_bytes"] for x in report["cache_candidates"]),
+                             report["scanned_allocated_bytes"])
+
+    def test_development_project_caches_require_context_and_preserve_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            project = root / "Projects/full stack"
+            project.mkdir(parents=True)
+            for marker in ("package.json", "angular.json", "pyproject.toml"):
+                (project / marker).write_text("{}")
+            expected = []
+            samples = []
+            for relative, _, _ in scanner.PROJECT_CACHES:
+                cache = project / relative
+                cache.mkdir(parents=True)
+                sample = cache / "data"
+                sample.write_bytes(b"cache" * 1024)
+                expected.append(str(cache))
+                samples.append(sample)
+                # Matching names without a project marker must stay unclassified.
+                unrelated = root / "Documents" / relative
+                unrelated.mkdir(parents=True, exist_ok=True)
+                (unrelated / "personal").write_bytes(b"personal")
+            for relative in ("node_modules/library/index.js", ".next/server/output",
+                             ".venv/lib/python", ".git/objects/data", ".env",
+                             ".claude/settings.json", ".codex/auth.json"):
+                path = project / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"keep")
+            before = {p: p.stat() for p in samples}
+            with patch.object(scanner.Path, "home", return_value=root):
+                report = scanner.analyze(root)
+                targeted = scanner.analyze(project / ".next/cache")
+            self.assertEqual({x["path"] for x in report["cache_candidates"]}, set(expected))
+            self.assertEqual(len(targeted["cache_candidates"]), 1)
+            self.assertEqual(before, {p: p.stat() for p in samples})
+
+    def test_backend_global_caches_and_nested_projects_are_not_double_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for relative in (".composer/cache", ".local/share/NuGet/v3-cache",
+                             ".local/share/NuGet/plugins-cache", ".cache/go-build"):
+                cache = root / relative
+                cache.mkdir(parents=True)
+                (cache / "data").write_bytes(b"x" * 4096)
+            nested = root / ".composer/cache/nested"
+            nested.mkdir()
+            (nested / "package.json").write_text("{}")
+            (nested / ".next/cache").mkdir(parents=True)
+            (nested / ".next/cache/data").write_bytes(b"x" * 4096)
+            with patch.object(scanner.Path, "home", return_value=root):
+                report = scanner.analyze(root)
+            items = report["cache_candidates"]
+            self.assertEqual(len(items), 4)
+            self.assertEqual(sum(x["allocated_bytes"] for x in items),
+                             report["scanned_allocated_bytes"])
+            self.assertIn("Go build cache", {x["kind"] for x in items})
+
     def test_installed_cli_runs_outside_skill_directory(self):
         for harness in (".claude", ".agents"):
             for method in ("copy", "symlink"):
