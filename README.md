@@ -226,6 +226,7 @@ O CLI `skills` é uma ferramenta externa, com sua própria [política de telemet
 skills/disk-cleanup/
 ├── SKILL.md             # Instruções e regras de aprovação para o agente
 ├── agents/openai.yaml   # Metadados opcionais de interface OpenAI
+├── references/          # Instruções lidas só quando o caso exige (Windows, Docker e SDKs)
 └── scripts/analyze.py   # Analisador local, somente leitura
 tests/test_analyze.py    # Testes do analisador
 LICENSE                 # Licença MIT

@@ -317,10 +317,13 @@ def analyze(root, min_bytes=500 * 1024**2, limit=30):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=str(Path.home()))
+    parser.add_argument("--root", default=str(Path.home()),
+                        help="Directory to scan (default: current user's home)")
     parser.add_argument("--min-size-mb", type=float, default=500,
-                        help="Minimum logical size in MiB (default: 500)")
-    parser.add_argument("--limit", type=int, default=30)
+                        help="Minimum logical size in MiB for large_files "
+                             "(default: 500)")
+    parser.add_argument("--limit", type=int, default=30,
+                        help="Maximum number of large_files (default: 30)")
     args = parser.parse_args()
     if args.limit < 1 or args.min_size_mb < 0:
         parser.error("limit must be positive and min-size-mb nonnegative")
