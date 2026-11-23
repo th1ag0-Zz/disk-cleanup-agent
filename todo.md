@@ -1,0 +1,1 @@
+- rodar o `/writing-for-agents`

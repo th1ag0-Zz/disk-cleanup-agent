@@ -6,8 +6,8 @@ O analisador roda localmente, lê apenas metadados e não possui modo de exclus�
 
 ## Requisitos
 
-- **macOS ou Linux** para executar o analisador. Windows não é suportado.
-- **Python 3.9+**, disponível como `python3`.
+- **macOS, Linux ou Windows** para executar o analisador.
+- **Python 3.9+**, disponível como `python3` no macOS e no Linux, ou como `py -3` ou `python` no Windows. No Windows, instale pelo [python.org](https://www.python.org/downloads/windows/) ou com `winget install Python.Python.3.12`; o atalho da Microsoft Store que aparece sem Python instalado não executa scripts.
 - Um agente compatível com Agent Skills, com acesso ao terminal e ao disco que será analisado.
 - **Node.js 22.20+ e npm/npx** para instalar pelo CLI `skills`, conforme os [requisitos oficiais](https://github.com/vercel-labs/skills#install-a-skill). A instalação manual e o analisador não exigem Node.js.
 
@@ -75,6 +75,14 @@ mkdir -p "$skill_destination"
 cp -R skills/disk-cleanup "$skill_destination/"
 ```
 
+No Windows, use o PowerShell:
+
+```powershell
+$skillDestination = 'C:\caminho\do\diretorio\de\skills'
+New-Item -ItemType Directory -Force -Path $skillDestination | Out-Null
+Copy-Item -Recurse -LiteralPath 'skills\disk-cleanup' -Destination $skillDestination
+```
+
 Preserve a pasta `scripts/` junto de `SKILL.md`. Se já existir uma instalação, revise/substitua a versão antiga antes de copiar para evitar pastas aninhadas. A instalação manual não é gerenciada pelo CLI `skills`.
 
 ## Como usar
@@ -137,6 +145,15 @@ python3 skills/disk-cleanup/scripts/analyze.py --root "$HOME/Downloads" --min-si
 python3 skills/disk-cleanup/scripts/analyze.py --help
 ```
 
+No Windows, pelo PowerShell:
+
+```powershell
+py -3 skills\disk-cleanup\scripts\analyze.py --root $HOME
+py -3 skills\disk-cleanup\scripts\analyze.py --root "$HOME\Downloads" --min-size-mb 1024 --limit 20
+```
+
+No WSL, o analisador roda como Linux e cobre o disco do WSL. Para analisar a pasta pessoal do Windows, use o Python do Windows.
+
 | Opção | Padrão | Descrição |
 | --- | --- | --- |
 | `--root` | Pasta pessoal do usuário | Diretório a analisar. |
@@ -157,7 +174,8 @@ A saída JSON vai para o terminal, com tamanhos em bytes:
 | `cache_candidates` | Caches conhecidos encontrados dentro do escopo, com tamanho alocado e indicador `scan_complete`. |
 | `large_files` | Arquivos acima do limite mínimo, com tamanho lógico e alocado. |
 | `scan_error_count`, `scan_errors` | Quantidade de erros e detalhes de até 100 ocorrências. |
-| `skipped_symlinks`, `skipped_mounts` | Quantidade de links simbólicos ignorados e até 100 caminhos em outros sistemas de arquivos. |
+| `skipped_symlinks`, `skipped_mounts` | Quantidade de links simbólicos e junctions do Windows ignorados, e até 100 caminhos em outros sistemas de arquivos. |
+| `cloud_only_files` | Arquivos do OneDrive ou de outro serviço que estão só na nuvem. Contam como 0 byte alocado. |
 
 O espaço usado do volume pode ser maior que o total analisado, pois a varredura cobre apenas o diretório escolhido. Revise erros e locais ignorados antes de considerar os resultados completos.
 
@@ -176,6 +194,7 @@ Além das pastas gerais de cache, o analisador reconhece estes locais dentro da 
 | pytest, mypy e Ruff | `<projeto>/.pytest_cache`, `.mypy_cache`, `.ruff_cache` |
 | Composer | `~/.composer/cache`, além das pastas gerais |
 | NuGet | `~/.local/share/NuGet/v3-cache` e `plugins-cache` |
+| Windows | Cada entrada de `AppData\Local\Temp`; em `AppData\Local`: `npm-cache\_cacache`, `npm-cache\_npx`, `pip\Cache`, `uv\cache`, `pypoetry\Cache`, `Yarn\Cache`, `pnpm\store`, `pnpm-cache`, `node-gyp\Cache`, `ms-playwright`, `Cypress\Cache`, `go-build`, `Composer`, `NuGet\v3-cache`, `NuGet\plugins-cache`, `Microsoft\Windows\INetCache` e `CrashDumps` |
 
 Os caches JavaScript exigem `package.json` na raiz do projeto; Angular exige `angular.json`. Os caches Python exigem um destes arquivos: `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` ou `pytest.ini`. A verificação lê apenas metadados desses arquivos. Pastas com o mesmo nome, sem esse contexto, continuam sendo inventariadas e exigem classificação manual.
 
@@ -183,17 +202,17 @@ Nas pastas gerais, também há rótulos específicos para Go (`go-build`), Compo
 
 Os caminhos de [Next.js](https://nextjs.org/docs/app/guides/ci-build-caching), [Angular](https://angular.dev/cli/cache), [Vite](https://vite.dev/config/shared-options.html#cachedir) e [NuGet](https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders) seguem suas referências oficiais. Feche servidores e processos antes da limpeza: caches Next.js podem conter dados usados durante a execução; o cache pytest contém histórico de testes. Builds, ambientes virtuais, dependências completas, credenciais e sessões de agentes continuam exigindo revisão específica.
 
-- Caches de aplicativos: descobre individualmente as entradas de `~/Library/Caches` e `~/.cache`, sem exigir uma lista de aplicativos. Entradas genéricas precisam de revisão do conteúdo antes de propor remoção.
+- Caches de aplicativos: descobre individualmente as entradas de `~/Library/Caches`, `~/.cache` e, no Windows, `AppData\Local\Temp`, sem exigir uma lista de aplicativos. O restante de `AppData` guarda configurações e dados e não é classificado como cache. Entradas genéricas precisam de revisão do conteúdo antes de propor remoção.
 - Caches de ferramentas: reconhece também Expo, Xcode, npm/npx, Gradle, Cargo, Rustup, Bun, Yarn e pnpm fora dessas pastas. Playwright, uv, pip, navegadores e outros aplicativos são identificados nas pastas gerais de cache. Podem exigir downloads ou recompilações após a remoção; ferramentas em uso devem ser fechadas antes.
 - Arquivos grandes: apenas candidatos para decisão humana; tamanho não significa que podem ser apagados.
 - Docker, emuladores e SDKs: precisam de inspeção própria. Volumes podem conter bancos de dados.
 - Projetos e arquivos pessoais: nunca classificados automaticamente como descartáveis.
 
-Durante a varredura, links simbólicos e entradas em outros sistemas de arquivos são ignorados. A raiz fornecida é resolvida antes da análise. Permissões negadas aparecem no relatório; os totais podem ser parciais. Não há elevação automática de privilégios.
+Durante a varredura, links simbólicos, junctions do Windows e entradas em outros sistemas de arquivos são ignorados. A raiz fornecida é resolvida antes da análise. Permissões negadas aparecem no relatório; os totais podem ser parciais. Não há elevação automática de privilégios.
 
-Arquivos com hard links são contados uma vez. APFS, snapshots, arquivos esparsos e arquivos abertos podem alterar o espaço realmente recuperado. A soma dos tamanhos dos candidatos é uma estimativa; o resultado da limpeza deve ser conferido pela variação medida de espaço livre.
+Arquivos com hard links são contados uma vez. No Windows, o tamanho alocado usa o tamanho do arquivo, com exceção de arquivos comprimidos ou esparsos (tamanho em disco) e de arquivos só na nuvem (0 byte). Caminhos acima de 260 caracteres podem gerar erros se o suporte a caminhos longos estiver desligado; eles aparecem em `scan_errors`. Apagar um arquivo sincronizado com o OneDrive também o apaga na nuvem: para liberar espaço local, use "Liberar espaço" no OneDrive. APFS, snapshots, arquivos esparsos e arquivos abertos podem alterar o espaço realmente recuperado. A soma dos tamanhos dos candidatos é uma estimativa; o resultado da limpeza deve ser conferido pela variação medida de espaço livre.
 
-A identificação automática de caches se restringe à pasta pessoal do usuário atual e ao escopo analisado. Respeita também `XDG_CACHE_HOME` quando for um caminho absoluto dentro dessa pasta pessoal; valores relativos ou externos não ampliam o escopo. Outras localizações personalizadas são inventariadas quando dentro da raiz, mas precisam de classificação manual. Os candidatos não incluem alvos sobrepostos. Erros, links ou volumes ignorados fazem os tamanhos dos candidatos serem marcados como estimativas incompletas.
+A identificação automática de caches se restringe à pasta pessoal do usuário atual e ao escopo analisado. Respeita também `XDG_CACHE_HOME` quando for um caminho absoluto dentro dessa pasta pessoal; valores relativos ou externos não ampliam o escopo. Outras localizações personalizadas são inventariadas quando dentro da raiz, mas precisam de classificação manual. Os candidatos não incluem alvos sobrepostos. Erros, links ou volumes ignorados dentro de um candidato fazem o tamanho dele ser marcado como estimativa incompleta.
 
 ## Privacidade
 
@@ -218,6 +237,8 @@ README.md
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
+
+O comportamento específico do Windows (junctions, arquivos só na nuvem, caches de `AppData`, `lstat` com identidade de hard links) é testado por simulação em qualquer sistema. No Windows, os testes que criam links simbólicos exigem o Modo de Desenvolvedor ou um terminal de administrador.
 
 Os testes usam apenas arquivos temporários e verificam preservação dos dados, links simbólicos, hard links, arquivos esparsos, classificação de caches e erros de permissão. Também executam o analisador instalado em `.claude/skills` e `.agents/skills`, por cópia e link simbólico, a partir de outro diretório e com espaços nos caminhos. Não é necessário instalar dependências Python.
 

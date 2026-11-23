@@ -1,11 +1,15 @@
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -96,7 +100,8 @@ class AnalyzeTests(unittest.TestCase):
                 path.write_bytes(b"x" * 4096)
             external = Path(outside) / "private"
             external.write_bytes(b"x" * 8192)
-            (root / ".cache/link").symlink_to(outside, target_is_directory=True)
+            link = root / ".cache/nested/app/link"
+            link.symlink_to(outside, target_is_directory=True)
             for setting, expected in (
                 (str(root / "custom-cache"), 2),
                 (str(root / ".cache/nested"), 1),
@@ -108,7 +113,10 @@ class AnalyzeTests(unittest.TestCase):
                     report = scanner.analyze(root)
                 self.assertEqual(len(report["cache_candidates"]), expected)
                 self.assertEqual(report["files_scanned"], 2)
-                self.assertTrue(all(not x["scan_complete"] for x in report["cache_candidates"]))
+                # Only candidates containing the skipped link are estimates.
+                for item in report["cache_candidates"]:
+                    self.assertEqual(item["scan_complete"],
+                                     Path(item["path"]) not in link.parents)
                 targets = [Path(x["path"]) for x in report["cache_candidates"]]
                 self.assertFalse(any(a in b.parents for a in targets for b in targets))
 
@@ -179,6 +187,82 @@ class AnalyzeTests(unittest.TestCase):
             self.assertEqual(sum(x["allocated_bytes"] for x in items),
                              report["scanned_allocated_bytes"])
             self.assertIn("Go build cache", {x["kind"] for x in items})
+
+    def test_windows_appdata_caches_and_temp_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            local = root / "AppData/Local"
+            paths = ["npm-cache/_cacache/index", "npm-cache/_logs/debug.log",
+                     "pip/Cache/http/data", "Temp/build-123/data", "Temp/setup.tmp",
+                     "Google/Chrome/User Data/Default/History", "Programs/App/app.exe"]
+            for name in paths:
+                path = local / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x" * 4096)
+            with patch.object(scanner.Path, "home", return_value=root):
+                report = scanner.analyze(root)
+            # Profiles, installed programs and npm logs are not caches.
+            self.assertEqual({x["path"] for x in report["cache_candidates"]}, {
+                str(local / name) for name in (
+                    "npm-cache/_cacache", "pip/Cache", "Temp/build-123", "Temp/setup.tmp")})
+            self.assertEqual(report["files_scanned"], len(paths))
+
+    def test_cache_paths_match_case_insensitively_where_the_os_does(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            cache = root / "appdata/local/npm-cache/_cacache"
+            cache.mkdir(parents=True)
+            (cache / "index").write_bytes(b"x" * 4096)
+            with patch.object(scanner.Path, "home", return_value=root), patch.object(
+                    scanner.os.path, "normcase", side_effect=lambda value: value.lower()):
+                report = scanner.analyze(root)
+            self.assertEqual(len(report["cache_candidates"]), 1)
+            self.assertEqual(report["cache_candidates"][0]["allocated_bytes"],
+                             report["scanned_allocated_bytes"])
+
+    def test_windows_junctions_and_cloud_placeholders(self):
+        junction = SimpleNamespace(st_mode=stat.S_IFDIR | 0o777, st_reparse_tag=0xA0000003)
+        symlink = SimpleNamespace(st_mode=stat.S_IFREG, st_reparse_tag=0xA000000C)
+        cloud = SimpleNamespace(st_mode=stat.S_IFREG, st_reparse_tag=0x9000001A,
+                                st_file_attributes=0x400000, st_size=10**9)
+        plain = SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=0, st_size=1000)
+        sparse = SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=0x200, st_size=10**6)
+        self.assertTrue(scanner.is_link(junction))
+        self.assertTrue(scanner.is_link(symlink))
+        self.assertFalse(scanner.is_link(cloud))
+        self.assertTrue(scanner.is_cloud_only(cloud))
+        self.assertEqual(scanner.allocated(cloud), 0)
+        self.assertEqual(scanner.allocated(plain), 1000)
+        with patch.object(scanner, "windows_compressed_size", return_value=4096):
+            self.assertEqual(scanner.allocated(sparse, Path("sparse")), 4096)
+        with patch.object(scanner, "windows_compressed_size", side_effect=OSError("denied")):
+            self.assertEqual(scanner.allocated(sparse, Path("sparse")), 10**6)
+
+    def test_windows_stat_mode_keeps_identity_for_hardlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "file").write_bytes(b"x" * 8192)
+            os.link(root / "file", root / "hardlink")
+            (root / "dir").mkdir()
+            (root / "dir/other").write_bytes(b"y" * 10)
+            with patch.object(scanner, "WINDOWS", True):
+                report = scanner.analyze(root, min_bytes=0)
+            self.assertEqual(report["files_scanned"], 2)
+            self.assertEqual(report["skipped_mounts"], [])
+            self.assertEqual(report["scan_error_count"], 0)
+
+    def test_cli_platform_support(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["analyze.py", "--root", tmp]
+            output = io.StringIO()
+            with patch.object(scanner.sys, "platform", "win32"), patch.object(
+                    scanner.sys, "argv", argv), redirect_stdout(output):
+                scanner.main()
+            self.assertEqual(json.loads(output.getvalue())["files_scanned"], 0)
+            with patch.object(scanner.sys, "platform", "freebsd"), patch.object(
+                    scanner.sys, "argv", argv), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    scanner.main()
 
     def test_installed_cli_runs_outside_skill_directory(self):
         for harness in (".claude", ".agents"):
