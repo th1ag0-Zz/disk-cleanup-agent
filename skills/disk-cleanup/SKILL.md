@@ -1,6 +1,6 @@
 ---
 name: disk-cleanup
-description: Free disk space safely: scan storage, list caches and large files, delete only approved items. Use when the user asks about disk usage, low space, cleaning caches, or what to delete.
+description: "Free disk space safely: scan storage, list caches and large files, delete only approved items. Use when the user asks about disk usage, low space, cleaning caches, or what to delete."
 ---
 
 # Disk cleanup
